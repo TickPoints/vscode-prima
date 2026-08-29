@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="prima-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b7bff" />
+      <stop offset="1" stop-color="#3b2c8f" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#prima-bg)" />
+  <path
+    d="M 46 88 h 92 a 10 10 0 0 1 0 20 h -31 c 8 14 14 30 18 46 h 13 a 10 10 0 0 1 0 20 h -13 c 5 18 12 34 22 46 a 10 10 0 0 1 -16 12 c -11 -14 -19 -33 -24 -54 h -27 a 10 10 0 0 1 0 -20 h 27 c -4 -14 -10 -28 -17 -40 h -44 a 10 10 0 0 1 0 -20 z M 170 76 a 10 10 0 0 1 20 0 v 44 c 0 22 8 32 24 38 a 10 10 0 0 1 -6 19 c -22 -8 -38 -24 -38 -56 z"
+    fill="#ffffff"
+  />
+</svg>

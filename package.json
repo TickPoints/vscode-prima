@@ -1,0 +1,81 @@
+{
+  "name": "prima-lang",
+  "displayName": "Prima",
+  "description": "Prima language support: syntax highlighting, file icons, snippets, and language configuration for .pra files.",
+  "version": "0.1.0",
+  "publisher": "TickPoints",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TickPoints/vscode-prima"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "prima",
+    "scientific computing",
+    "symbolic math",
+    "language"
+  ],
+  "icon": "icons/prima.png",
+  "activationEvents": [
+    "onLanguage:prima"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "prima",
+        "aliases": [
+          "Prima",
+          "prima"
+        ],
+        "extensions": [
+          ".pra"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "prima",
+        "scopeName": "source.prima",
+        "path": "./syntaxes/prima.tmLanguage.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "prima-icons",
+        "label": "Prima Icons",
+        "path": "./icons/prima-icon-theme.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "prima",
+        "path": "./snippets/prima.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.1",
+    "mocha": "^10.4.0",
+    "typescript": "^5.5.0"
+  }
+}

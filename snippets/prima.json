@@ -1,0 +1,97 @@
+{
+  "let": {
+    "prefix": "let",
+    "body": ["let ${1:name}${2: : ${3:Type}} = ${4:value};"],
+    "description": "let binding"
+  },
+  "fn": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:params})${3: -> ${4:Type}} {", "\t${5:body}", "}"],
+    "description": "Function definition"
+  },
+  "class": {
+    "prefix": "class",
+    "body": [
+      "class ${1:Name} {",
+      "\tpub ${2:field}: ${3:Type},",
+      "\tpub fn new(${4:params}) -> Self {",
+      "\t\t${5:/* initialize */}",
+      "\t}",
+      "\tpub fn ${6:method}(self) -> ${1:Name} {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Class definition"
+  },
+  "for": {
+    "prefix": "for",
+    "body": ["for ${1:i} in ${2:iterable} {", "\t${3:body}", "}"],
+    "description": "for loop over an iterable"
+  },
+  "forr": {
+    "prefix": "forr",
+    "body": ["for ${1:i} in ${2:0}..${3:n} {", "\t${4:body}", "}"],
+    "description": "for loop over a range"
+  },
+  "forstep": {
+    "prefix": "forstep",
+    "body": ["for ${1:i} in ${2:0}..${3:n} step ${4:1} {", "\t${5:body}", "}"],
+    "description": "for loop over a range with a step"
+  },
+  "while": {
+    "prefix": "while",
+    "body": ["while ${1:cond} {", "\t${2:body}", "}"],
+    "description": "while loop"
+  },
+  "if": {
+    "prefix": "if",
+    "body": ["if ${1:cond} {", "\t${2:body}", "}"],
+    "description": "if statement"
+  },
+  "ifelse": {
+    "prefix": "ifelse",
+    "body": ["if ${1:cond} {", "\t${2:then}", "} else {", "\t${3:else}", "}"],
+    "description": "if/else statement"
+  },
+  "match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\t${2:pattern} => ${3:result},",
+      "\t_ => ${4:fallback}",
+      "}"
+    ],
+    "description": "match expression"
+  },
+  "import": {
+    "prefix": "import",
+    "body": ["import ${1:module};"],
+    "description": "import a module"
+  },
+  "fromimport": {
+    "prefix": "from",
+    "body": ["from ${1:module} import ${2:name};"],
+    "description": "import a name from a module"
+  },
+  "config": {
+    "prefix": "config",
+    "body": ["config {", "\t${1:fraction} := ${2:true},", "}"],
+    "description": "config strategy block"
+  },
+  "parfor": {
+    "prefix": "parfor",
+    "body": ["parfor ${1:i} in ${2:0}..${3:n} {", "\t${4:body}", "}"],
+    "description": "parallel for loop"
+  },
+  "println": {
+    "prefix": "println",
+    "body": ["println(${1:value});"],
+    "description": "print a line"
+  },
+  "main": {
+    "prefix": "main",
+    "body": ["//! ${1:module description}", "", "let ${2:result} = ${3:expression};", "println($2);"],
+    "description": "Module skeleton"
+  }
+}

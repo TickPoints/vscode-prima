@@ -1,0 +1,234 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Prima",
+  "scopeName": "source.prima",
+  "patterns": [
+    { "include": "#def-name" },
+    { "include": "#strings" },
+    { "include": "#comments" },
+    { "include": "#annotations" },
+    { "include": "#numbers" },
+    { "include": "#types" },
+    { "include": "#keywords" },
+    { "include": "#reserved" },
+    { "include": "#builtins" },
+    { "include": "#symbols" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "def-name": {
+      "patterns": [
+        {
+          "comment": "`fn name(...)` definition; must precede the generic keyword rule",
+          "match": "(\\bfn\\b)(\\s+)([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.prima" },
+            "3": { "name": "entity.name.function.prima" }
+          }
+        },
+        {
+          "comment": "`class Name { ... }` definition",
+          "match": "(\\bclass\\b)(\\s+)([A-Z][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.prima" },
+            "3": { "name": "entity.name.type.prima" }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "include": "#fstring" },
+        { "include": "#rawstring" },
+        { "include": "#texstring" },
+        { "include": "#dquoted" },
+        { "include": "#squoted" }
+      ]
+    },
+    "fstring": {
+      "patterns": [
+        {
+          "comment": "f\"...\" / f'...' / rf\"...\" / rf'...' with {expr} interpolation",
+          "name": "string.quoted.double.prima",
+          "begin": "\\b(?:rf|RF|rF|Rf|f|F)(\"|')",
+          "beginCaptures": {
+            "2": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "\\1",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          },
+          "patterns": [
+            { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.prima" },
+            {
+              "match": "\\\\(?:[abfnrtv\"'\\\\]|u\\{[0-9A-Fa-f]+\\})",
+              "name": "constant.character.escape.prima"
+            },
+            {
+              "comment": "`{expr}` / `{expr:spec}` interpolation (recursively the full grammar)",
+              "name": "meta.interpolation.prima",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [{ "include": "$self" }]
+            }
+          ]
+        }
+      ]
+    },
+    "rawstring": {
+      "patterns": [
+        {
+          "comment": "r\"...\" / r'...' (no escapes)",
+          "name": "string.quoted.double.raw.prima",
+          "begin": "\\br(\"|')",
+          "beginCaptures": {
+            "2": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "\\1",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          }
+        }
+      ]
+    },
+    "texstring": {
+      "patterns": [
+        {
+          "comment": "tex\"...\" TeX literal (view-only)",
+          "name": "string.quoted.double.tex.prima",
+          "begin": "\\btex(\")",
+          "beginCaptures": {
+            "2": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          }
+        }
+      ]
+    },
+    "dquoted": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.prima",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          },
+          "patterns": [
+            {
+              "match": "\\\\(?:[abfnrtv\"'\\\\]|u\\{[0-9A-Fa-f]+\\})",
+              "name": "constant.character.escape.prima"
+            }
+          ]
+        }
+      ]
+    },
+    "squoted": {
+      "patterns": [
+        {
+          "comment": "'...' string or 'a' Char literal",
+          "name": "string.quoted.single.prima",
+          "begin": "'",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          },
+          "patterns": [
+            {
+              "match": "\\\\(?:[abfnrtv\"'\\\\]|u\\{[0-9A-Fa-f]+\\})",
+              "name": "constant.character.escape.prima"
+            }
+          ]
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "match": "///.*$", "name": "comment.line.documentation.prima" },
+        { "match": "//!.*$", "name": "comment.line.documentation.prima" },
+        { "match": "//.*$", "name": "comment.line.double-slash.prima" },
+        { "begin": "/\\*", "end": "\\*/", "name": "comment.block.prima" }
+      ]
+    },
+    "annotations": {
+      "patterns": [
+        {
+          "comment": "@builtin / @parallel / @jit / @gpu / @c_api::extern",
+          "match": "@[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?",
+          "name": "keyword.control.annotation.prima"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "\\b(?:0[xX][0-9A-Fa-f]+|0[oO][0-7]+|0[bB][01]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b",
+          "name": "constant.numeric.prima"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "match": "\\b(?:Integer|Rational|Real|Complex|Number|F64|F32|I8|I16|I32|I64|I128|U8|U16|U32|U64|U128|Isize|Usize|Bool|String|Char|Array|Matrix|Tuple|Option|Result|Value|Expr|Symbol|Fn|MFn|Self)\\b",
+          "name": "support.type.prima"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(?:let|mut|const|fn|return|for|in|while|if|else|step|class|match|parfor|config|with|pub|import|from|as|true|false)\\b",
+          "name": "keyword.control.prima"
+        }
+      ]
+    },
+    "reserved": {
+      "patterns": [
+        {
+          "comment": "reserved tokens (async/yield/macro/trait/impl) and removed try/catch",
+          "match": "\\b(?:async|yield|macro|trait|impl|try|catch)\\b",
+          "name": "keyword.other.prima"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "comment": "explicit collapse / conversion functions: to_*, try_*, checked_*, clamped_*, rounded_*, truncated_*",
+          "match": "\\b(?:to_|try_|checked_|clamped_|rounded_|truncated_)[A-Za-z0-9_]+\\b",
+          "name": "support.function.builtin.prima"
+        },
+        {
+          "match": "\\b(?:print|println|range|len|enumerate|zip|sorted|reversed|sum|prod|min|max|all|any|join|count|index|first|last|linspace|map|filter|reduce|simplify|expand|factor|derivative|partial|grad|limit|sqrt|exp|log|ln|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|abs|floor|ceil|round|unwrap|expect|to_string)\\b",
+          "name": "support.function.builtin.prima"
+        }
+      ]
+    },
+    "symbols": {
+      "patterns": [
+        {
+          "comment": "builtin mathematical constants",
+          "match": "\\b(?:pi|tau)\\b",
+          "name": "constant.language.prima"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||->|=>|::|:=|\\.\\.=|\\.\\.|\\+=|-=|=|@\\.|@|\\*\\*|\\^|\\+|\\-|\\*|/|%|<|>|=|!|\\?|∪|∩|\\\\|\\||\\|>",
+          "name": "keyword.operator.prima"
+        }
+      ]
+    }
+  }
+}
