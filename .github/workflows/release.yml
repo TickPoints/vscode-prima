@@ -1,0 +1,125 @@
+# Release pipeline: compile, test, and package the extension when a `v*` tag is
+# pushed (or the workflow is dispatched manually), then attach the `.vsix` to a
+# matching GitHub Release.
+#
+# This workflow holds no credentials — it only builds and cuts a GitHub Release.
+# Publishing to the VS Code Marketplace is a separate, manual step; see the
+# "Publishing" section of README.md.
+#
+# The tag drives the channel: an even minor version (v0.2.0) is a stable
+# release, an odd minor version (v0.3.0) is a pre-release. The Marketplace only
+# accepts plain `major.minor.patch` versions, so the tag must match
+# `package.json` exactly.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: package and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Resolve and check the version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag '$tag' must look like v0.2.0 (plain major.minor.patch; the Marketplace rejects semver pre-release suffixes)"
+            exit 1
+          fi
+          version="${tag#v}"
+          manifest="$(jq -r .version package.json)"
+          if [ "$version" != "$manifest" ]; then
+            echo "::error::tag '$tag' does not match package.json version '$manifest'; bump the manifest before tagging"
+            exit 1
+          fi
+          minor="$(printf '%s' "$version" | cut -d. -f2)"
+          if [ $(( minor % 2 )) -eq 1 ]; then
+            prerelease=true
+          else
+            prerelease=false
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "vsix=prima-lang-$version.vsix" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (version $version, prerelease=$prerelease)"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compile
+        run: bun run compile
+
+      - name: Test (headless)
+        run: xvfb-run -a bun run test
+
+      - name: Package .vsix
+        env:
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then
+            bunx vsce package --no-dependencies --pre-release
+          else
+            bunx vsce package --no-dependencies
+          fi
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prima-lang-vsix
+          path: '*.vsix'
+          if-no-files-found: error
+
+      - name: Extract release notes from the changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { found = 1; next }
+            found && /^## \[/ { found = 0 }
+            found { print }
+          ' CHANGELOG.md > .release-notes.md
+          if [ ! -s .release-notes.md ]; then
+            echo "Release ${VERSION}." > .release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: .release-notes.md
+          files: ${{ steps.version.outputs.vsix }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}

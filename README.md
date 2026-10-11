@@ -85,6 +85,50 @@ bun run test          # @vscode/test-electron suite (headless: xvfb-run -a bun r
 CI (`.github/workflows/ci.yml`) compiles, runs the test suite, and packages a
 `.vsix` on every push and PR.
 
+## Publishing
+
+Pushing a `v*` tag compiles, tests, and packages the extension, then attaches
+the resulting `.vsix` to a matching GitHub Release — CI holds no credentials:
+
+```bash
+# bump the version in package.json and CHANGELOG.md first, then:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The tag must equal the `version` in `package.json` — plain `major.minor.patch`,
+because the Marketplace rejects semver pre-release suffixes — and the workflow
+fails otherwise. The tag also selects the channel: an **even minor** version
+(`v0.2.0`) is a stable release, an **odd minor** version (`v0.3.0`) is a
+pre-release, and the GitHub Release is flagged accordingly. That is the
+[recommended convention](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#prerelease-extensions),
+which keeps a release ahead of the pre-release it supersedes. The `release`
+workflow can also be started manually from the Actions tab, passing an existing
+tag.
+
+### Publishing to the Marketplace
+
+Putting the extension on the
+[VS Code Marketplace](https://marketplace.visualstudio.com/) is a deliberate,
+manual step — CI holds no publish credentials. Build the `.vsix` and publish that
+same artifact, so the Marketplace build matches the release:
+
+```bash
+bun run package
+bunx vsce publish --no-dependencies --packagePath prima-lang-<version>.vsix
+# odd minor (pre-release): add --pre-release
+```
+
+`vsce` can authenticate two ways:
+
+- **Personal access token** — `bunx vsce login TickPoints` once; the token needs
+  the *Marketplace → Manage* scope. Azure DevOps
+  [retires global PATs on 2026-12-01](https://devblogs.microsoft.com/devops/retirement-of-global-personal-access-tokens-in-azure-devops/),
+  so this is a stopgap.
+- **Microsoft Entra ID** — after `az login` with an account that is a member of
+  the `TickPoints` publisher, pass `--azure-credential`. Preferred once PATs are
+  gone, and no app registration is needed for local use.
+
 ## Roadmap
 
 - Language server protocol client + `prima`-backed server (hover from stdlib
