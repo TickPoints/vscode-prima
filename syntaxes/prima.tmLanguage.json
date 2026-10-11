@@ -12,6 +12,7 @@
     { "include": "#keywords" },
     { "include": "#reserved" },
     { "include": "#builtins" },
+    { "include": "#variants" },
     { "include": "#symbols" },
     { "include": "#operators" }
   ],
@@ -48,9 +49,9 @@
     "fstring": {
       "patterns": [
         {
-          "comment": "f\"...\" / f'...' / rf\"...\" / rf'...' with {expr} interpolation",
+          "comment": "`rf`/`f` prefixes are lowercase only (spec §3/§18.1)",
           "name": "string.quoted.double.prima",
-          "begin": "\\b(?:rf|RF|rF|Rf|f|F)(\"|')",
+          "begin": "\\b(?:rf|f)(\"|')",
           "beginCaptures": {
             "2": { "name": "punctuation.definition.string.begin.prima" }
           },
@@ -161,8 +162,8 @@
     "annotations": {
       "patterns": [
         {
-          "comment": "@builtin / @parallel / @jit / @gpu / @c_api::extern",
-          "match": "@[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?",
+          "comment": "@builtin / @parallel / @jit / @gpu / @c_api::extern; the lookbehind keeps the binary `@` operator (`a @ b`) from reading as an annotation",
+          "match": "(?<![A-Za-z0-9_])@[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?",
           "name": "keyword.control.annotation.prima"
         }
       ]
@@ -170,7 +171,7 @@
     "numbers": {
       "patterns": [
         {
-          "match": "\\b(?:0[xX][0-9A-Fa-f]+|0[oO][0-7]+|0[bB][01]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b",
+          "match": "\\b(?:0[xX][0-9A-Fa-f]+|0[bB][01]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b",
           "name": "constant.numeric.prima"
         }
       ]
@@ -178,13 +179,19 @@
     "types": {
       "patterns": [
         {
-          "match": "\\b(?:Integer|Rational|Real|Complex|Number|F64|F32|I8|I16|I32|I64|I128|U8|U16|U32|U64|U128|Isize|Usize|Bool|String|Char|Array|Matrix|Tuple|Option|Result|Value|Expr|Symbol|Fn|MFn|Self)\\b",
+          "comment": "numeric-tower and container types (spec §6); `Real`/`Value` are gone, `Dict`/`Set` are in",
+          "match": "\\b(?:Integer|Rational|Complex|Number|F64|F32|I8|I16|I32|I64|I128|U8|U16|U32|U64|U128|Isize|Usize|Bool|String|Char|Array|Matrix|Tuple|Dict|Set|Option|Result|Expr|Symbol|Fn|MFn|Self)\\b",
           "name": "support.type.prima"
         }
       ]
     },
     "keywords": {
       "patterns": [
+        {
+          "comment": "`self` receiver (spec §4.5)",
+          "match": "\\bself\\b",
+          "name": "variable.language.prima"
+        },
         {
           "match": "\\b(?:let|mut|const|fn|return|for|in|while|if|else|step|class|match|parfor|config|with|pub|import|from|as|true|false)\\b",
           "name": "keyword.control.prima"
@@ -194,7 +201,7 @@
     "reserved": {
       "patterns": [
         {
-          "comment": "reserved tokens (async/yield/macro/trait/impl) and removed try/catch",
+          "comment": "reserved tokens (`async`/`yield`/`macro`/`trait`/`impl`) plus the removed `try`/`catch`, kept only so the toolchain can hint `E0010`",
           "match": "\\b(?:async|yield|macro|trait|impl|try|catch)\\b",
           "name": "keyword.other.prima"
         }
@@ -213,6 +220,15 @@
         }
       ]
     },
+    "variants": {
+      "patterns": [
+        {
+          "comment": "built-in enum variants `Some`/`None`/`Ok`/`Err` (spec §4.4)",
+          "match": "\\b(?:Some|None|Ok|Err)\\b",
+          "name": "support.constant.prima"
+        }
+      ]
+    },
     "symbols": {
       "patterns": [
         {
@@ -225,7 +241,7 @@
     "operators": {
       "patterns": [
         {
-          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||->|=>|::|:=|\\.\\.=|\\.\\.|\\+=|-=|=|@\\.|@|\\*\\*|\\^|\\+|\\-|\\*|/|%|<|>|=|!|\\?|∪|∩|\\\\|\\||\\|>",
+          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||->|=>|::|:=|\\.\\.=|\\.\\.|\\+=|-=|=|@\\.|@|\\*\\*|\\^|\\+|\\-|\\*|/|%|<|>|!|\\?|∪|∩|\\\\|\\|>|\\|",
           "name": "keyword.operator.prima"
         }
       ]

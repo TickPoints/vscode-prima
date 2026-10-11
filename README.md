@@ -16,17 +16,19 @@ the editor.
   notes, and `= help:` suggestions are shown; the status bar reflects the latest
   result and re-checks every open `.pra` file when clicked.
 - **Syntax highlighting** — a full TextMate grammar (`source.prima`) covering:
-  - keywords and reserved words (`let`, `fn`, `class`, `match`, `parfor`,
-    `config`, `import`, `async`/`trait`, `try`/`catch`, ...);
+  - keywords and reserved words (`let`, `fn`, `class`, `self`, `match`,
+    `parfor`, `config`, `import`, `async`/`trait`, ...);
   - the numeric tower and container types (`Integer`, `Rational`, `Number`,
-    `F64`, `I8..U128`, `Array<T>`, `Result<A, B>`, `Fn(...) -> T`, ...);
+    `Complex`, `F64`, `I8..U128`, `Array<T>`, `Dict`, `Set`, `Result<A, B>`,
+    `Fn(...) -> T`, ...);
   - string family: `"..."`, `'...'`, raw `r"..."`/`r'...'`, f-strings
     `f"..."`/`f'...'`/`rf"..."` (with `{expr}` interpolation), and TeX literals
     `tex"..."`;
-  - number literals (decimal, `0x`/`0o`/`0b`, floats);
+  - number literals (decimal, `0x`/`0b`, floats);
   - operators including `^`, `@`/`@.`, `..`/`..=`, `:=`, `->`/`=>`, `∪`/`∩`;
   - annotations `@builtin`, `@jit`, `@gpu`, `@parallel`, `@c_api::extern`;
-  - comments: `///` docs, `//!` module docs, `//`, `/* */`.
+  - enum variants (`Some`/`None`/`Ok`/`Err`) and comments (`///` docs, `//!`
+    module docs, `//`, `/* */`).
 - **File icon** — a lightweight *Prima Icons* theme (File icon theme → *Prima
   Icons*) gives `.pra` files the Prima mark; everything else keeps the default
   icon set.
