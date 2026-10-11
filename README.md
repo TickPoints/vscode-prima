@@ -44,11 +44,13 @@ the command palette (*Preferences: File Icon Theme*).
 
 ## Development
 
+The JavaScript toolchain is [Bun](https://bun.sh):
+
 ```bash
-npm install
-npm run compile       # tsc -> out/
-npm run package       # vsce package -> prima-lang-*.vsix
-npm test              # @vscode/test-electron suite (headless; xvfb-run -a npm test on Linux CI)
+bun install
+bun run compile       # tsc -> out/
+bun run package       # vsce package -> prima-lang-*.vsix
+bun run test          # @vscode/test-electron suite (headless: xvfb-run -a bun run test)
 ```
 
 CI (`.github/workflows/ci.yml`) compiles, runs the test suite, and packages a
