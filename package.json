@@ -1,8 +1,8 @@
 {
   "name": "prima-lang",
   "displayName": "Prima",
-  "description": "Prima language support: syntax highlighting, file icons, snippets, and language configuration for .pra files.",
-  "version": "0.1.0",
+  "description": "Prima language support: syntax highlighting, file icons, snippets, language configuration, and `prima check` diagnostics for .pra files.",
+  "version": "0.2.0",
   "publisher": "TickPoints",
   "license": "MIT",
   "packageManager": "bun@1.4.2",

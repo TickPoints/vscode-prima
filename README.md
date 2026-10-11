@@ -49,7 +49,7 @@ the editor.
 
 - From the [VS Code Marketplace](https://marketplace.visualstudio.com/vscode)
   (once published): search **Prima**.
-- From a `.vsix`: `code --install-extension prima-lang-0.1.0.vsix`.
+- From a `.vsix`: `code --install-extension prima-lang-0.2.0.vsix`.
 
 ## Usage
 
@@ -87,8 +87,8 @@ CI (`.github/workflows/ci.yml`) compiles, runs the test suite, and packages a
 
 ## Roadmap
 
-- Language server protocol client + `prima`-backed server (diagnostics via
-  `prima check`, hover from stdlib docs, completion, go-to-definition).
+- Language server protocol client + `prima`-backed server (hover from stdlib
+  docs, completion, go-to-definition; `prima check` already covers diagnostics).
 - `prima fmt` on save.
 
 ## License
