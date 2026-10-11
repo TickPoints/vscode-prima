@@ -3,13 +3,18 @@
 Language support for [Prima](https://github.com/TickPoints/prima-language), a
 symbol-first scientific computing language.
 
-> **v0.1 scope**: this first release is purely client-side — syntax highlighting,
-> a `.pra` file icon, language configuration (comments, brackets, auto-closing,
-> indentation), and snippets. A language server (diagnostics, go-to-definition,
-> hover, completion) will land in later releases.
+The extension covers the editor surface statically — syntax highlighting, a
+`.pra` file icon, language configuration, and snippets — and, when the `prima`
+toolchain is on your `PATH`, surfaces its `prima check` diagnostics directly in
+the editor.
 
 ## Features
 
+- **Static checking** — when a `prima` binary is available, the extension runs
+  `prima --json check` on demand and on save, and maps the toolchain's
+  diagnostics into VS Code problems. Codes (`error[E0010]`, `warning[W0003]`, …),
+  notes, and `= help:` suggestions are shown; the status bar reflects the latest
+  result and re-checks every open `.pra` file when clicked.
 - **Syntax highlighting** — a full TextMate grammar (`source.prima`) covering:
   - keywords and reserved words (`let`, `fn`, `class`, `match`, `parfor`,
     `config`, `import`, `async`/`trait`, `try`/`catch`, ...);
@@ -30,6 +35,14 @@ symbol-first scientific computing language.
 - **Snippets** — `fn`, `class`, `for`, `while`, `if`/`if-else`, `match`,
   `import`, `config`, `parfor`, `println`, and more.
 
+## Requirements
+
+- The [Prima toolchain](https://github.com/TickPoints/prima-language) is
+  **optional** — syntax highlighting, icons, and snippets work without it. The
+  *check* commands and diagnostics need a `prima` binary (0.4 or newer, for the
+  `--json` diagnostic stream) on your `PATH`; point the extension at a different
+  location with the `prima.command` setting.
+
 ## Install
 
 - From the [VS Code Marketplace](https://marketplace.visualstudio.com/vscode)
@@ -40,7 +53,21 @@ symbol-first scientific computing language.
 
 Open any `.pra` file (or set the language to **Prima**). The `.pra` extension is
 registered automatically; to use the custom file icon, select *Prima Icons* in
-the command palette (*Preferences: File Icon Theme*).
+the command palette (*Preferences: File Icon Theme*) or run **Prima: Enable .pra
+File Icons**.
+
+`.pra` files are checked automatically on save when a `prima` binary is found.
+The following commands are available from the command palette:
+
+- **Prima: Check Current File** — run `prima check` on the active editor.
+- **Prima: Check All Open Files** — check every open `.pra` document.
+- **Prima: Enable .pra File Icons** — switch to the *Prima Icons* theme.
+- **Prima: Show Version** — report the extension version.
+
+## Settings
+
+- `prima.command` — the `prima` executable path or command name used for
+  `prima check` (default: `prima`).
 
 ## Development
 

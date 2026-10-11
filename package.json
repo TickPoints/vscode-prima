@@ -29,6 +29,34 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "prima.checkDocument",
+        "title": "Prima: Check Current File"
+      },
+      {
+        "command": "prima.checkAll",
+        "title": "Prima: Check All Open Files"
+      },
+      {
+        "command": "prima.enableIcons",
+        "title": "Prima: Enable .pra File Icons"
+      },
+      {
+        "command": "prima.showVersion",
+        "title": "Prima: Show Version"
+      }
+    ],
+    "configuration": {
+      "title": "Prima",
+      "properties": {
+        "prima.command": {
+          "type": "string",
+          "default": "prima",
+          "description": "The `prima` executable path or command name used for `prima check`."
+        }
+      }
+    },
     "languages": [
       {
         "id": "prima",
