@@ -1,10 +1,24 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 import { charOffsetAtByte, checkText, parseCheckJson, resolvePrima } from '../../checker';
 
 /** One NDJSON line as emitted by `prima --json check`. */
 function ndjson(value: Record<string, unknown>): string {
     return JSON.stringify(value);
+}
+
+/**
+ * Write an executable stand-in for `prima` and return its path. Tests use it to
+ * exercise the failure paths (non-zero exit, hang, signal) without a real toolchain.
+ */
+function fakePrima(script: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prima-fake-'));
+    const file = path.join(dir, 'prima');
+    fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return file;
 }
 
 suite('Prima checker', () => {
@@ -128,6 +142,42 @@ suite('Prima checker', () => {
         assert.strictEqual(result.exitCode, -1);
         assert.strictEqual(result.diagnostics.length, 0);
         assert.match(result.error ?? '', /not found/);
+    });
+
+    test('reports a non-zero exit with no diagnostics instead of passing', async () => {
+        const fake = fakePrima('exit 3');
+        const result = await checkText('let a = 1;\n', fake);
+
+        assert.strictEqual(result.exitCode, 3);
+        assert.deepStrictEqual(result.diagnostics, []);
+        assert.ok(result.error, 'a silent non-zero exit must not look like a pass');
+        assert.match(result.error ?? '', /exited with code 3/);
+    });
+
+    test('reports a killed invocation as an error, not a pass', async function () {
+        this.timeout(10000);
+        // `sleep` outlives the timeout, so the child is killed with no diagnostics.
+        const fake = fakePrima('sleep 30');
+        const result = await checkText('let a = 1;\n', fake, { timeoutMs: 300 });
+
+        assert.deepStrictEqual(result.diagnostics, []);
+        assert.ok(result.error, 'a timed-out check must not look like a pass');
+        assert.match(result.error ?? '', /timed out/i);
+    });
+
+    test('keeps diagnostics when a run exits non-zero with output', async () => {
+        const diagnostic = ndjson({
+            code: 'E0010',
+            message: 'expected expression',
+            severity: 'error',
+            spans: [{ byte_end: 9, byte_start: 8, column: 9, is_primary: true, line: 1 }],
+        });
+        const fake = fakePrima(`printf '%s\\n' '${diagnostic}' >&2\nexit 1`);
+        const result = await checkText('let a = ;\n', fake);
+
+        assert.strictEqual(result.exitCode, 1);
+        assert.strictEqual(result.diagnostics.length, 1);
+        assert.strictEqual(result.error, undefined, 'reported diagnostics explain the failure');
     });
 
     test('checkText surfaces diagnostics from a live toolchain', async function () {

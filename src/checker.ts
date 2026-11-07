@@ -49,6 +49,12 @@ export interface CheckResult {
     error?: string;
 }
 
+/** Tuning knobs for {@link checkText}; production callers use the defaults. */
+export interface CheckOptions {
+    /** How long the `prima check` invocation may run before it is killed. */
+    timeoutMs?: number;
+}
+
 /** Shape of one NDJSON diagnostic emitted by `prima --json` (see `src/diagnostics.rs`). */
 interface JsonSpan {
     file?: string;
@@ -158,15 +164,16 @@ export async function resolvePrima(command: string | undefined): Promise<string>
  * `.pra` file first. Module resolution during `check` is limited to the embedded
  * stdlib, so the temporary location does not change the result.
  */
-export async function checkText(text: string, command: string): Promise<CheckResult> {
+export async function checkText(text: string, command: string, options: CheckOptions = {}): Promise<CheckResult> {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prima-'));
     const tmpFile = path.join(tmpDir, 'check.pra');
+    const timeoutMs = options.timeoutMs ?? CHECK_TIMEOUT_MS;
 
     try {
         fs.writeFileSync(tmpFile, text, 'utf8');
 
         const { stdout, stderr } = await execFileAsync(command, ['--json', 'check', tmpFile], {
-            timeout: CHECK_TIMEOUT_MS,
+            timeout: timeoutMs,
             maxBuffer: MAX_OUTPUT_BYTES,
             env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
         });
@@ -174,21 +181,57 @@ export async function checkText(text: string, command: string): Promise<CheckRes
         const diagnostics = parseCheckJson(output);
         return { exitCode: 0, diagnostics, error: unexplainedOutput(output, diagnostics) };
     } catch (err) {
-        const e = err as { code?: number | string; stdout?: string; stderr?: string };
+        const e = err as ExecFailure;
         if (e.code === 'ENOENT') {
             return { exitCode: -1, diagnostics: [], error: `prima executable not found: ${command}` };
         }
 
         const output = joinStreams(e.stdout, e.stderr);
         const diagnostics = parseCheckJson(output);
+        const exitCode = typeof e.code === 'number' ? e.code : 2;
         return {
-            exitCode: typeof e.code === 'number' ? e.code : 2,
+            exitCode,
             diagnostics,
-            error: unexplainedOutput(output, diagnostics),
+            // A run that carried diagnostics has already explained itself. Everything
+            // else — a non-zero exit, a timeout, a signal, a buffer overflow — must
+            // surface as an error; otherwise "could not run" masquerades as "passed".
+            error: diagnostics.length > 0 ? undefined : failureMessage(e, exitCode, output, timeoutMs),
         };
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+}
+
+/** The subset of a rejected `execFile` error that the failure path inspects. */
+interface ExecFailure {
+    code?: number | string | null;
+    killed?: boolean;
+    signal?: string | null;
+    stdout?: string;
+    stderr?: string;
+}
+
+/**
+ * Explain why a check produced no diagnostics. Prefers the most specific cause the
+ * process reports (timeout, signal, oversized output), falling back to the captured
+ * output and finally to the exit code itself.
+ */
+function failureMessage(e: ExecFailure, exitCode: number, output: string, timeoutMs: number): string {
+    if (e.code === 'ETIMEDOUT' || (e.killed === true && e.signal !== undefined)) {
+        return `\`prima check\` timed out after ${Math.round(timeoutMs / 1000)}s and was killed.`;
+    }
+    if (e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+        return `\`prima check\` produced more than ${Math.round(MAX_OUTPUT_BYTES / (1024 * 1024))} MiB of output and was stopped.`;
+    }
+
+    const hint = unexplainedOutput(output, []);
+    if (hint !== undefined) {
+        return hint;
+    }
+    if (typeof e.signal === 'string' && e.signal.length > 0) {
+        return `\`prima check\` was killed by ${e.signal}.`;
+    }
+    return `\`prima check\` exited with code ${exitCode} and reported no diagnostics.`;
 }
 
 /** Join captured streams with a newline so a line from one cannot merge with the other. */
