@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { charOffsetAtByte, checkText, resolvePrima, type CheckResult, type PrimaDiagnostic } from './checker';
+import { CheckState } from './controller';
 
 const DIAGNOSTIC_COLLECTION = 'prima';
 const ICON_THEME_ID = 'prima-icons';
@@ -20,14 +21,14 @@ class PrimaChecker {
 
     private inFlight = 0;
 
-    /** Diagnostic counts per open document, summed for the status bar. */
-    private readonly counts = new Map<string, { errors: number; warnings: number }>();
-
-    /** True when the most recent checks could not run (e.g. an older `prima` without `--json`). */
-    private failing = false;
+    /** Per-document counts and failure state, with stale-result guards. */
+    private readonly state = new CheckState();
 
     /** Last toolchain failure reported to the user, so a broken setup warns once, not on every save. */
     private reportedError: string | undefined;
+
+    /** True once the "toolchain not found" warning has been shown, to avoid one popup per file. */
+    private warnedMissingToolchain = false;
 
     constructor(collection: vscode.DiagnosticCollection, status: vscode.StatusBarItem) {
         this.collection = collection;
@@ -46,47 +47,77 @@ class PrimaChecker {
             void vscode.window.showWarningMessage('No active editor to check.');
             return;
         }
+        if (target.languageId !== 'prima') {
+            void vscode.window.showWarningMessage('The active editor is not a Prima file.');
+            return;
+        }
         await this.check(target);
     }
 
     async checkAll(): Promise<void> {
+        if (this.command.length === 0) {
+            this.warnMissingToolchain();
+            return;
+        }
         const documents = vscode.workspace.textDocuments.filter((doc) => doc.languageId === 'prima');
         await Promise.all(documents.map((doc) => this.check(doc)));
     }
 
     /** Drop diagnostics for a document that is no longer open. */
     forget(uri: vscode.Uri): void {
-        this.counts.delete(uri.toString());
+        this.state.forget(uri.toString());
         this.collection.delete(uri);
         this.render();
     }
 
     private async check(doc: vscode.TextDocument): Promise<void> {
         if (this.command.length === 0) {
-            void vscode.window.showWarningMessage(
-                'The `prima` toolchain was not found. Install it or set `prima.command`.',
-            );
+            this.warnMissingToolchain();
             return;
         }
 
+        const token = this.state.begin(doc.uri.toString(), doc.version);
         this.inFlight += 1;
         this.render();
         try {
-            const result = await checkText(doc.getText(), this.command);
-            const diagnostics = this.toDiagnostics(doc, result);
-            this.collection.set(doc.uri, diagnostics);
+            const text = doc.getText();
+            const result = await checkText(text, this.command);
+
+            // The document may have been closed or edited, or a newer check may have
+            // started, while this one ran. Drop the result rather than let a stale
+            // run overwrite fresher diagnostics or resurrect a closed document.
+            if (doc.isClosed || !this.state.isCurrent(token)) {
+                return;
+            }
 
             const errors = result.diagnostics.filter((d) => d.severity === 'error').length;
-            this.counts.set(doc.uri.toString(), { errors, warnings: result.diagnostics.length - errors });
-            this.failing = result.error !== undefined;
+            const counts = { errors, warnings: result.diagnostics.length - errors };
+            if (!this.state.settle(token, counts, result.error !== undefined, doc.version)) {
+                return;
+            }
 
+            this.collection.set(doc.uri, this.toDiagnostics(doc, text, result));
             if (result.error) {
                 void this.reportToolchainError(doc, result.error);
+            } else {
+                // A later recurrence of the same failure should warn again.
+                this.reportedError = undefined;
             }
         } finally {
             this.inFlight -= 1;
             this.render();
         }
+    }
+
+    /** Tell the user once that no `prima` binary is configured, no matter how many files are checked. */
+    private warnMissingToolchain(): void {
+        if (this.warnedMissingToolchain) {
+            return;
+        }
+        this.warnedMissingToolchain = true;
+        void vscode.window.showWarningMessage(
+            'The `prima` toolchain was not found. Install it or set `prima.command`.',
+        );
     }
 
     /** Surface a check failure once per distinct message instead of only logging it. */
@@ -100,8 +131,7 @@ class PrimaChecker {
         await vscode.window.showWarningMessage(`Prima check could not run: ${summary}`);
     }
 
-    private toDiagnostics(doc: vscode.TextDocument, result: CheckResult): vscode.Diagnostic[] {
-        const text = doc.getText();
+    private toDiagnostics(doc: vscode.TextDocument, text: string, result: CheckResult): vscode.Diagnostic[] {
         return result.diagnostics.map((d) => {
             const severity = d.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
             const diagnostic = new vscode.Diagnostic(rangeFor(doc, text, d), messageFor(d), severity);
@@ -122,11 +152,11 @@ class PrimaChecker {
             return;
         }
 
-        const { errors, warnings } = this.totals();
+        const { errors, warnings, failed } = this.state.totals();
         if (this.inFlight > 0) {
             this.status.text = '$(sync~spin) prima';
             this.status.tooltip = 'Checking…';
-        } else if (this.failing) {
+        } else if (failed) {
             this.status.text = '$(warning) prima';
             this.status.tooltip = 'The last `prima check` could not run.';
         } else if (errors > 0) {
@@ -141,17 +171,6 @@ class PrimaChecker {
         }
         this.status.command = 'prima.checkAll';
         this.status.show();
-    }
-
-    /** Sum the per-document counts so the status bar reflects every open `.pra` file. */
-    private totals(): { errors: number; warnings: number } {
-        let errors = 0;
-        let warnings = 0;
-        for (const counts of this.counts.values()) {
-            errors += counts.errors;
-            warnings += counts.warnings;
-        }
-        return { errors, warnings };
     }
 }
 
@@ -170,9 +189,13 @@ function rangeFor(doc: vscode.TextDocument, text: string, d: PrimaDiagnostic): v
 
     const line = Math.min(Math.max(0, d.line), Math.max(0, doc.lineCount - 1));
     const lineText = doc.lineAt(line).text;
-    const startChar = Math.min(Math.max(0, d.column), Math.max(0, lineText.length - 1));
+    // A diagnostic without a span points at a position, not a character. Allow the
+    // caret to sit at the end of the line (missing `;`, unclosed block, …) instead
+    // of clamping it onto the last character.
+    const startChar = Math.min(Math.max(0, d.column), lineText.length);
+    const endChar = Math.min(startChar + 1, lineText.length);
     return doc.validateRange(
-        new vscode.Range(new vscode.Position(line, startChar), new vscode.Position(line, startChar + 1)),
+        new vscode.Range(new vscode.Position(line, startChar), new vscode.Position(line, endChar)),
     );
 }
 
