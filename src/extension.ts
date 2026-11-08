@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 
-import { charOffsetAtByte, checkText, resolvePrima, type CheckResult, type PrimaDiagnostic } from './checker';
+import { checkText, createByteToCharIndex, resolvePrima, type CheckResult, type PrimaDiagnostic } from './checker';
+import { CheckState, mapLimit } from './controller';
 
 const DIAGNOSTIC_COLLECTION = 'prima';
 const ICON_THEME_ID = 'prima-icons';
+/** How many `prima check` processes may run at once when checking every open file. */
+const CHECK_CONCURRENCY = 4;
 
 /**
  * Owns the diagnostic collection and status bar, and turns `prima check` results into
@@ -14,20 +17,24 @@ const ICON_THEME_ID = 'prima-icons';
 class PrimaChecker {
     private command = '';
 
+    private enabled = true;
+
+    private checkOnSave = true;
+
     private readonly collection: vscode.DiagnosticCollection;
 
     private readonly status: vscode.StatusBarItem;
 
     private inFlight = 0;
 
-    /** Diagnostic counts per open document, summed for the status bar. */
-    private readonly counts = new Map<string, { errors: number; warnings: number }>();
-
-    /** True when the most recent checks could not run (e.g. an older `prima` without `--json`). */
-    private failing = false;
+    /** Per-document counts and failure state, with stale-result guards. */
+    private readonly state = new CheckState();
 
     /** Last toolchain failure reported to the user, so a broken setup warns once, not on every save. */
     private reportedError: string | undefined;
+
+    /** True once the "toolchain not found" warning has been shown, to avoid one popup per file. */
+    private warnedMissingToolchain = false;
 
     constructor(collection: vscode.DiagnosticCollection, status: vscode.StatusBarItem) {
         this.collection = collection;
@@ -36,8 +43,28 @@ class PrimaChecker {
 
     /** Resolve the toolchain and render the initial status. Safe to call again on config changes. */
     async start(): Promise<void> {
-        this.command = await resolvePrima(vscode.workspace.getConfiguration('prima').get<string>('command'));
+        const config = vscode.workspace.getConfiguration('prima');
+        this.enabled = config.get<boolean>('enable', true);
+        this.checkOnSave = config.get<boolean>('checkOnSave', true);
+
+        if (!this.enabled) {
+            this.command = '';
+            this.state.clear();
+            this.collection.clear();
+            this.render();
+            return;
+        }
+
+        this.command = await resolvePrima(config.get<string>('command'));
+        if (this.command.length > 0) {
+            // A toolchain installed after the extension started deserves a fresh warning set.
+            this.warnedMissingToolchain = false;
+        }
         this.render();
+    }
+
+    isEnabled(): boolean {
+        return this.enabled;
     }
 
     async checkDocument(doc?: vscode.TextDocument): Promise<void> {
@@ -46,47 +73,113 @@ class PrimaChecker {
             void vscode.window.showWarningMessage('No active editor to check.');
             return;
         }
+        if (target.languageId !== 'prima') {
+            void vscode.window.showWarningMessage('The active editor is not a Prima file.');
+            return;
+        }
+        if (!this.enabled) {
+            void vscode.window.showInformationMessage('Prima checking is disabled (`prima.enable`).');
+            return;
+        }
+        if (!(await this.ensureCommand())) {
+            return;
+        }
         await this.check(target);
     }
 
     async checkAll(): Promise<void> {
+        if (!this.enabled) {
+            return;
+        }
+        if (!(await this.ensureCommand())) {
+            return;
+        }
         const documents = vscode.workspace.textDocuments.filter((doc) => doc.languageId === 'prima');
-        await Promise.all(documents.map((doc) => this.check(doc)));
+        await mapLimit(documents, CHECK_CONCURRENCY, (doc) => this.check(doc));
+    }
+
+    /** The save hook honours both switches without prompting the user. */
+    async checkOnSaveDocument(doc: vscode.TextDocument): Promise<void> {
+        if (!this.enabled || !this.checkOnSave || doc.languageId !== 'prima') {
+            return;
+        }
+        await this.check(doc);
+    }
+
+    /**
+     * Make sure a command is available, re-probing when the toolchain was installed
+     * after activation. Only manual commands pay for the re-probe; saves do not.
+     */
+    private async ensureCommand(): Promise<boolean> {
+        if (this.command.length > 0) {
+            return true;
+        }
+        await this.start();
+        if (this.command.length === 0) {
+            this.warnMissingToolchain();
+            return false;
+        }
+        return true;
     }
 
     /** Drop diagnostics for a document that is no longer open. */
     forget(uri: vscode.Uri): void {
-        this.counts.delete(uri.toString());
+        this.state.forget(uri.toString());
         this.collection.delete(uri);
         this.render();
     }
 
     private async check(doc: vscode.TextDocument): Promise<void> {
+        if (!this.enabled) {
+            return;
+        }
         if (this.command.length === 0) {
-            void vscode.window.showWarningMessage(
-                'The `prima` toolchain was not found. Install it or set `prima.command`.',
-            );
+            this.warnMissingToolchain();
             return;
         }
 
+        const token = this.state.begin(doc.uri.toString(), doc.version);
         this.inFlight += 1;
         this.render();
         try {
-            const result = await checkText(doc.getText(), this.command);
-            const diagnostics = this.toDiagnostics(doc, result);
-            this.collection.set(doc.uri, diagnostics);
+            const text = doc.getText();
+            const result = await checkText(text, this.command);
+
+            // The document may have been closed or edited, or a newer check may have
+            // started, while this one ran. Drop the result rather than let a stale
+            // run overwrite fresher diagnostics or resurrect a closed document.
+            if (doc.isClosed || !this.state.isCurrent(token)) {
+                return;
+            }
 
             const errors = result.diagnostics.filter((d) => d.severity === 'error').length;
-            this.counts.set(doc.uri.toString(), { errors, warnings: result.diagnostics.length - errors });
-            this.failing = result.error !== undefined;
+            const counts = { errors, warnings: result.diagnostics.length - errors };
+            if (!this.state.settle(token, counts, result.error !== undefined, doc.version)) {
+                return;
+            }
 
+            this.collection.set(doc.uri, this.toDiagnostics(doc, text, result));
             if (result.error) {
                 void this.reportToolchainError(doc, result.error);
+            } else {
+                // A later recurrence of the same failure should warn again.
+                this.reportedError = undefined;
             }
         } finally {
             this.inFlight -= 1;
             this.render();
         }
+    }
+
+    /** Tell the user once that no `prima` binary is configured, no matter how many files are checked. */
+    private warnMissingToolchain(): void {
+        if (this.warnedMissingToolchain) {
+            return;
+        }
+        this.warnedMissingToolchain = true;
+        void vscode.window.showWarningMessage(
+            'The `prima` toolchain was not found. Install it or set `prima.command`.',
+        );
     }
 
     /** Surface a check failure once per distinct message instead of only logging it. */
@@ -100,11 +193,12 @@ class PrimaChecker {
         await vscode.window.showWarningMessage(`Prima check could not run: ${summary}`);
     }
 
-    private toDiagnostics(doc: vscode.TextDocument, result: CheckResult): vscode.Diagnostic[] {
-        const text = doc.getText();
+    private toDiagnostics(doc: vscode.TextDocument, text: string, result: CheckResult): vscode.Diagnostic[] {
+        // Encode the document once, then map every span against the same index.
+        const offsetAt = createByteToCharIndex(text);
         return result.diagnostics.map((d) => {
             const severity = d.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
-            const diagnostic = new vscode.Diagnostic(rangeFor(doc, text, d), messageFor(d), severity);
+            const diagnostic = new vscode.Diagnostic(rangeFor(doc, offsetAt, d), messageFor(d), severity);
             diagnostic.source = 'prima';
             if (d.code) {
                 diagnostic.code = d.code;
@@ -114,6 +208,10 @@ class PrimaChecker {
     }
 
     private render(): void {
+        if (!this.enabled) {
+            this.status.hide();
+            return;
+        }
         if (this.command.length === 0) {
             this.status.text = '$(warning) prima not found';
             this.status.tooltip = 'The `prima` toolchain was not found on PATH. Install it or set `prima.command`.';
@@ -122,11 +220,11 @@ class PrimaChecker {
             return;
         }
 
-        const { errors, warnings } = this.totals();
+        const { errors, warnings, failed } = this.state.totals();
         if (this.inFlight > 0) {
             this.status.text = '$(sync~spin) prima';
             this.status.tooltip = 'Checking…';
-        } else if (this.failing) {
+        } else if (failed) {
             this.status.text = '$(warning) prima';
             this.status.tooltip = 'The last `prima check` could not run.';
         } else if (errors > 0) {
@@ -142,37 +240,34 @@ class PrimaChecker {
         this.status.command = 'prima.checkAll';
         this.status.show();
     }
-
-    /** Sum the per-document counts so the status bar reflects every open `.pra` file. */
-    private totals(): { errors: number; warnings: number } {
-        let errors = 0;
-        let warnings = 0;
-        for (const counts of this.counts.values()) {
-            errors += counts.errors;
-            warnings += counts.warnings;
-        }
-        return { errors, warnings };
-    }
 }
 
 /**
  * Map a diagnostic's byte span to a range. `prima --json` reports UTF-8 byte offsets;
- * VS Code positions count UTF-16 code units, so the bytes are decoded up to the offset.
+ * VS Code positions count UTF-16 code units, so the prebuilt index converts them.
  * Falls back to the reported line/column when the diagnostic carries no span.
  */
-function rangeFor(doc: vscode.TextDocument, text: string, d: PrimaDiagnostic): vscode.Range {
+function rangeFor(
+    doc: vscode.TextDocument,
+    offsetAt: (byteOffset: number) => number,
+    d: PrimaDiagnostic,
+): vscode.Range {
     if (d.byteStart >= 0 && d.byteEnd >= d.byteStart) {
-        const start = doc.positionAt(charOffsetAtByte(text, d.byteStart));
-        const end = doc.positionAt(charOffsetAtByte(text, d.byteEnd));
+        const start = doc.positionAt(offsetAt(d.byteStart));
+        const end = doc.positionAt(offsetAt(d.byteEnd));
         const range = new vscode.Range(start, end.isAfter(start) ? end : start.translate(0, 1));
         return doc.validateRange(range);
     }
 
     const line = Math.min(Math.max(0, d.line), Math.max(0, doc.lineCount - 1));
     const lineText = doc.lineAt(line).text;
-    const startChar = Math.min(Math.max(0, d.column), Math.max(0, lineText.length - 1));
+    // A diagnostic without a span points at a position, not a character. Allow the
+    // caret to sit at the end of the line (missing `;`, unclosed block, …) instead
+    // of clamping it onto the last character.
+    const startChar = Math.min(Math.max(0, d.column), lineText.length);
+    const endChar = Math.min(startChar + 1, lineText.length);
     return doc.validateRange(
-        new vscode.Range(new vscode.Position(line, startChar), new vscode.Position(line, startChar + 1)),
+        new vscode.Range(new vscode.Position(line, startChar), new vscode.Position(line, endChar)),
     );
 }
 
@@ -190,12 +285,28 @@ function messageFor(d: PrimaDiagnostic): string {
 
 async function enableIcons(): Promise<void> {
     const workbench = vscode.workspace.getConfiguration('workbench');
+    const inspect = workbench.inspect<string>('iconTheme');
+
     if (workbench.get<string>('iconTheme') === ICON_THEME_ID) {
         void vscode.window.showInformationMessage('Prima Icons is already active.');
         return;
     }
-    await workbench.update('iconTheme', ICON_THEME_ID, vscode.ConfigurationTarget.Global);
-    void vscode.window.showInformationMessage('Prima Icons enabled. .pra files now show the Prima icon.');
+
+    // Write at the same scope that currently decides the value, otherwise a
+    // workspace `workbench.iconTheme` silently wins and the command lies about
+    // having switched the theme.
+    const overriddenInWorkspace =
+        inspect?.workspaceValue !== undefined || inspect?.workspaceFolderValue !== undefined;
+    const target = overriddenInWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    await workbench.update('iconTheme', ICON_THEME_ID, target);
+
+    if (workbench.get<string>('iconTheme') === ICON_THEME_ID) {
+        void vscode.window.showInformationMessage('Prima Icons enabled. .pra files now show the Prima icon.');
+    } else {
+        void vscode.window.showWarningMessage(
+            'Could not switch the icon theme: a higher-priority `workbench.iconTheme` value wins. Select Prima Icons from the File Icon Theme picker instead.',
+        );
+    }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -213,18 +324,21 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('prima.checkDocument', () => checker.checkDocument()),
         vscode.commands.registerCommand('prima.checkAll', () => checker.checkAll()),
         vscode.commands.registerCommand('prima.enableIcons', () => enableIcons()),
-        vscode.workspace.onDidSaveTextDocument((doc) => {
-            if (doc.languageId === 'prima') {
-                void checker.checkDocument(doc);
-            }
-        }),
+        vscode.workspace.onDidSaveTextDocument((doc) => checker.checkOnSaveDocument(doc)),
         vscode.workspace.onDidCloseTextDocument((doc) => {
             if (doc.languageId === 'prima') {
                 checker.forget(doc.uri);
             }
         }),
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration('prima.command')) {
+            if (event.affectsConfiguration('prima.enable') || event.affectsConfiguration('prima.command')) {
+                void checker.start().then(() => {
+                    if (checker.isEnabled()) {
+                        return checker.checkAll();
+                    }
+                    return undefined;
+                });
+            } else if (event.affectsConfiguration('prima.checkOnSave')) {
                 void checker.start();
             }
         }),

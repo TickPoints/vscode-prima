@@ -28,6 +28,12 @@
     "onLanguage:prima"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Syntax highlighting, snippets and language configuration work in restricted mode. `prima check` executes the configured `prima` binary, and `prima.command` is a machine-scoped setting that a workspace cannot override."
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -50,10 +56,23 @@
     "configuration": {
       "title": "Prima",
       "properties": {
+        "prima.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Enable `prima check` diagnostics and the status bar item."
+        },
+        "prima.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Run `prima check` automatically when a `.pra` file is saved."
+        },
         "prima.command": {
           "type": "string",
           "default": "prima",
-          "description": "The `prima` executable path or command name used for `prima check`."
+          "scope": "machine",
+          "description": "The `prima` executable path or command name used for `prima check`. Machine-scoped so a workspace cannot change which binary runs."
         }
       }
     },
@@ -94,8 +113,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "bun run compile && vsce package --no-dependencies",
-    "test": "bun ./out/test/runTest.js"
+    "package": "vsce package --no-dependencies",
+    "test": "bun run compile && bun run test:unit && bun run test:integration",
+    "test:unit": "mocha --ui tdd out/test/suite",
+    "test:integration": "bun ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",

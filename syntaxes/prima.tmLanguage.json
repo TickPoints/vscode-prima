@@ -20,8 +20,8 @@
     "def-name": {
       "patterns": [
         {
-          "comment": "`fn name(...)` definition; must precede the generic keyword rule",
-          "match": "(\\bfn\\b)(\\s+)([a-z_][A-Za-z0-9_]*)",
+          "comment": "`fn name(...)` definition; must precede the generic keyword rule. Identifiers are Unicode-aware (spec §3)",
+          "match": "(\\bfn\\b)(\\s+)([\\p{L}_][\\p{L}\\p{N}_]*)",
           "captures": {
             "1": { "name": "keyword.control.prima" },
             "3": { "name": "entity.name.function.prima" }
@@ -29,7 +29,7 @@
         },
         {
           "comment": "`class Name { ... }` definition",
-          "match": "(\\bclass\\b)(\\s+)([A-Z][A-Za-z0-9_]*)",
+          "match": "(\\bclass\\b)(\\s+)([\\p{Lu}][\\p{L}\\p{N}_]*)",
           "captures": {
             "1": { "name": "keyword.control.prima" },
             "3": { "name": "entity.name.type.prima" }
@@ -39,6 +39,7 @@
     },
     "strings": {
       "patterns": [
+        { "include": "#rfstring" },
         { "include": "#fstring" },
         { "include": "#rawstring" },
         { "include": "#texstring" },
@@ -49,11 +50,11 @@
     "fstring": {
       "patterns": [
         {
-          "comment": "`rf`/`f` prefixes are lowercase only (spec §3/§18.1)",
+          "comment": "`f`-string prefix, lowercase only (spec §3/§18.1)",
           "name": "string.quoted.double.prima",
-          "begin": "\\b(?:rf|f)(\"|')",
+          "begin": "\\bf(\"|')",
           "beginCaptures": {
-            "2": { "name": "punctuation.definition.string.begin.prima" }
+            "1": { "name": "punctuation.definition.string.begin.prima" }
           },
           "end": "\\1",
           "endCaptures": {
@@ -76,6 +77,32 @@
         }
       ]
     },
+    "rfstring": {
+      "patterns": [
+        {
+          "comment": "`rf`-string: raw (no `\\n` escapes) but still interpolating (spec §18.1)",
+          "name": "string.quoted.double.raw.prima",
+          "begin": "\\brf(\"|')",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.string.begin.prima" }
+          },
+          "end": "\\1",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.prima" }
+          },
+          "patterns": [
+            { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.prima" },
+            {
+              "comment": "`{expr}` / `{expr:spec}` interpolation (recursively the full grammar)",
+              "name": "meta.interpolation.prima",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [{ "include": "$self" }]
+            }
+          ]
+        }
+      ]
+    },
     "rawstring": {
       "patterns": [
         {
@@ -83,7 +110,7 @@
           "name": "string.quoted.double.raw.prima",
           "begin": "\\br(\"|')",
           "beginCaptures": {
-            "2": { "name": "punctuation.definition.string.begin.prima" }
+            "1": { "name": "punctuation.definition.string.begin.prima" }
           },
           "end": "\\1",
           "endCaptures": {
@@ -99,7 +126,7 @@
           "name": "string.quoted.double.tex.prima",
           "begin": "\\btex(\")",
           "beginCaptures": {
-            "2": { "name": "punctuation.definition.string.begin.prima" }
+            "1": { "name": "punctuation.definition.string.begin.prima" }
           },
           "end": "\"",
           "endCaptures": {
@@ -179,8 +206,8 @@
     "types": {
       "patterns": [
         {
-          "comment": "numeric-tower and container types (spec §6); `Real`/`Value` are gone, `Dict`/`Set` are in",
-          "match": "\\b(?:Integer|Rational|Complex|Number|F64|F32|I8|I16|I32|I64|I128|U8|U16|U32|U64|U128|Isize|Usize|Bool|String|Char|Array|Matrix|Tuple|Dict|Set|Option|Result|Expr|Symbol|Fn|MFn|Self)\\b",
+          "comment": "numeric-tower and container types (spec §6); `Real`/`Value` are gone, `Error`/`Dict`/`Set` are in",
+          "match": "\\b(?:Integer|Rational|Complex|Number|F64|F32|I8|I16|I32|I64|I128|U8|U16|U32|U64|U128|Isize|Usize|Bool|String|Char|Array|Matrix|Tuple|Dict|Set|Option|Result|Expr|Symbol|Fn|MFn|Self|Error)\\b",
           "name": "support.type.prima"
         }
       ]
@@ -215,7 +242,7 @@
           "name": "support.function.builtin.prima"
         },
         {
-          "match": "\\b(?:print|println|range|len|enumerate|zip|sorted|reversed|sum|prod|min|max|all|any|join|count|index|first|last|linspace|map|filter|reduce|simplify|expand|factor|derivative|partial|grad|limit|sqrt|exp|log|ln|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|abs|floor|ceil|round|unwrap|expect|to_string)\\b",
+          "match": "\\b(?:print|println|input|read_line|range|len|enumerate|zip|sorted|reversed|sum|prod|min|max|all|any|join|count|index|first|last|linspace|map|filter|reduce|simplify|expand|factor|derivative|partial|grad|limit|sqrt|exp|log|ln|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|abs|floor|ceil|round|unwrap|expect|to_string)\\b",
           "name": "support.function.builtin.prima"
         }
       ]
@@ -223,8 +250,8 @@
     "variants": {
       "patterns": [
         {
-          "comment": "built-in enum variants `Some`/`None`/`Ok`/`Err` (spec §4.4)",
-          "match": "\\b(?:Some|None|Ok|Err)\\b",
+          "comment": "built-in enum variants `Some`/`None`/`Ok`/`Err`/`Nil` (spec §4.4/§5)",
+          "match": "\\b(?:Some|None|Ok|Err|Nil)\\b",
           "name": "support.constant.prima"
         }
       ]
@@ -241,7 +268,7 @@
     "operators": {
       "patterns": [
         {
-          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||->|=>|::|:=|\\.\\.=|\\.\\.|\\+=|-=|=|@\\.|@|\\*\\*|\\^|\\+|\\-|\\*|/|%|<|>|!|\\?|∪|∩|\\\\|\\|>|\\|",
+          "match": "===|!==|==|!=|<=|>=|&&|\\|\\||->|=>|::|:=|\\.\\.=|\\.\\.|\\+=|-=|=|@\\.|@|\\*\\*|\\^|\\+|\\-|\\*|/|%|<|>|!|\\?|∪|∩|\\\\|\\|",
           "name": "keyword.operator.prima"
         }
       ]

@@ -1,10 +1,24 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-import { charOffsetAtByte, checkText, parseCheckJson, resolvePrima } from '../../checker';
+import { charOffsetAtByte, checkText, createByteToCharIndex, parseCheckJson, resolvePrima } from '../../checker';
 
 /** One NDJSON line as emitted by `prima --json check`. */
 function ndjson(value: Record<string, unknown>): string {
     return JSON.stringify(value);
+}
+
+/**
+ * Write an executable stand-in for `prima` and return its path. Tests use it to
+ * exercise the failure paths (non-zero exit, hang, signal) without a real toolchain.
+ */
+function fakePrima(script: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prima-fake-'));
+    const file = path.join(dir, 'prima');
+    fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    return file;
 }
 
 suite('Prima checker', () => {
@@ -123,11 +137,106 @@ suite('Prima checker', () => {
         assert.strictEqual(charOffsetAtByte('abc', -5), 0);
     });
 
+    test('indexes byte offsets once and agrees with the per-call mapper', () => {
+        const text = 'let α = "汉字";\nlet β = 1;\n';
+        const offsetAt = createByteToCharIndex(text);
+
+        let byte = 0;
+        let character = 0;
+        for (const codePoint of text) {
+            assert.strictEqual(offsetAt(byte), character, `byte offset ${byte}`);
+            assert.strictEqual(offsetAt(byte), charOffsetAtByte(text, byte), `byte offset ${byte}`);
+            byte += Buffer.byteLength(codePoint, 'utf8');
+            character += codePoint.length;
+        }
+        assert.strictEqual(offsetAt(byte), character, 'end of text');
+    });
+
+    test('maps a byte offset inside a multi-byte character to its first UTF-16 unit', () => {
+        // `α` occupies bytes 4 and 5; either half maps to the character itself, never
+        // to a replacement character that would shift every later span by one.
+        const text = 'let α = 1;\n';
+        const offsetAt = createByteToCharIndex(text);
+        assert.strictEqual(offsetAt(4), 4);
+        assert.strictEqual(offsetAt(5), 4);
+        assert.strictEqual(offsetAt(6), 5);
+    });
+
     test('reports a missing executable without throwing', async () => {
         const result = await checkText('let a = 1;\n', '/nonexistent/prima-does-not-exist');
         assert.strictEqual(result.exitCode, -1);
         assert.strictEqual(result.diagnostics.length, 0);
         assert.match(result.error ?? '', /not found/);
+    });
+
+    test('reports a non-zero exit with no diagnostics instead of passing', async () => {
+        const fake = fakePrima('exit 3');
+        const result = await checkText('let a = 1;\n', fake);
+
+        assert.strictEqual(result.exitCode, 3);
+        assert.deepStrictEqual(result.diagnostics, []);
+        assert.ok(result.error, 'a silent non-zero exit must not look like a pass');
+        assert.match(result.error ?? '', /exited with code 3/);
+    });
+
+    test('reports a killed invocation as an error, not a pass', async function () {
+        this.timeout(10000);
+        // `sleep` outlives the timeout, so the child is killed with no diagnostics.
+        const fake = fakePrima('sleep 30');
+        const result = await checkText('let a = 1;\n', fake, { timeoutMs: 300 });
+
+        assert.deepStrictEqual(result.diagnostics, []);
+        assert.ok(result.error, 'a timed-out check must not look like a pass');
+        assert.match(result.error ?? '', /timed out/i);
+    });
+
+    test('flags a killed run even when it printed diagnostics first', async function () {
+        this.timeout(10000);
+        const diagnostic = ndjson({
+            code: 'W0003',
+            message: 'unused binding: `a`',
+            severity: 'warning',
+            spans: [{ byte_end: 5, byte_start: 4, column: 5, is_primary: true, line: 1 }],
+        });
+        // Emit one diagnostic, then hang until the timeout kills the run.
+        const fake = fakePrima(`printf '%s\\n' '${diagnostic}' >&2\nsleep 30`);
+        const result = await checkText('let a = 1;\n', fake, { timeoutMs: 400 });
+
+        assert.strictEqual(result.diagnostics.length, 1, 'the partial diagnostic is still useful');
+        assert.ok(result.error, 'incomplete output must not look like a finished run');
+        assert.match(result.error ?? '', /timed out|incomplete/i);
+    });
+
+    test('returns an error instead of rejecting when the temp directory is unusable', async () => {
+        const previous = process.env.TMPDIR;
+        process.env.TMPDIR = path.join(os.tmpdir(), 'prima-no-such-directory-for-tests');
+        try {
+            const result = await checkText('let a = 1;\n', '/nonexistent/prima-does-not-exist');
+            assert.strictEqual(result.exitCode, -1);
+            assert.ok(result.error, 'a filesystem failure must be reported, not thrown');
+            assert.match(result.error ?? '', /temporary/i);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.TMPDIR;
+            } else {
+                process.env.TMPDIR = previous;
+            }
+        }
+    });
+
+    test('keeps diagnostics when a run exits non-zero with output', async () => {
+        const diagnostic = ndjson({
+            code: 'E0010',
+            message: 'expected expression',
+            severity: 'error',
+            spans: [{ byte_end: 9, byte_start: 8, column: 9, is_primary: true, line: 1 }],
+        });
+        const fake = fakePrima(`printf '%s\\n' '${diagnostic}' >&2\nexit 1`);
+        const result = await checkText('let a = ;\n', fake);
+
+        assert.strictEqual(result.exitCode, 1);
+        assert.strictEqual(result.diagnostics.length, 1);
+        assert.strictEqual(result.error, undefined, 'reported diagnostics explain the failure');
     });
 
     test('checkText surfaces diagnostics from a live toolchain', async function () {
