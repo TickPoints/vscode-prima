@@ -4,10 +4,25 @@
     "body": ["let ${1:name}${2: : ${3:Type}} = ${4:value};"],
     "description": "let binding"
   },
+  "const": {
+    "prefix": "const",
+    "body": ["const ${1:NAME}${2: : ${3:Type}} = ${4:value};"],
+    "description": "const binding"
+  },
+  "publet": {
+    "prefix": "publet",
+    "body": ["pub let ${1:name}${2: : ${3:Type}} = ${4:value};"],
+    "description": "exported let binding"
+  },
   "fn": {
     "prefix": "fn",
     "body": ["fn ${1:name}(${2:params})${3: -> ${4:Type}} {", "\t${5:body}", "}"],
     "description": "Function definition"
+  },
+  "pubfn": {
+    "prefix": "pubfn",
+    "body": ["pub fn ${1:name}(${2:params})${3: -> ${4:Type}} {", "\t${5:body}", "}"],
+    "description": "Exported function definition"
   },
   "class": {
     "prefix": "class",
@@ -17,12 +32,23 @@
       "\tpub fn new(${4:params}) -> Self {",
       "\t\t${5:/* initialize */}",
       "\t}",
-      "\tpub fn ${6:method}(self) -> ${1:Name} {",
+      "\tpub fn ${6:method}(self) -> Self {",
       "\t\t$0",
       "\t}",
       "}"
     ],
     "description": "Class definition"
+  },
+  "impl": {
+    "prefix": "impl",
+    "body": [
+      "impl ops::${1:Add} for ${2:Class} {",
+      "\tfn ${3:add}(self, rhs: ${2:Class}) -> ${2:Class} {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Operator overload via the ops module"
   },
   "for": {
     "prefix": "for",
@@ -44,10 +70,20 @@
     "body": ["while ${1:cond} {", "\t${2:body}", "}"],
     "description": "while loop"
   },
+  "whilelet": {
+    "prefix": "whilelet",
+    "body": ["while let ${1:Some(x)} = ${2:iter.next()} {", "\t${3:body}", "}"],
+    "description": "while let loop (refutable pattern)"
+  },
   "if": {
     "prefix": "if",
     "body": ["if ${1:cond} {", "\t${2:body}", "}"],
     "description": "if statement"
+  },
+  "iflet": {
+    "prefix": "iflet",
+    "body": ["if let ${1:Some(x)} = ${2:value} {", "\t${3:body}", "}"],
+    "description": "if let (refutable pattern)"
   },
   "ifelse": {
     "prefix": "ifelse",
@@ -79,10 +115,45 @@
     "body": ["config {", "\t${1:fraction} := ${2:true},", "}"],
     "description": "config strategy block"
   },
+  "withconfig": {
+    "prefix": "withconfig",
+    "body": ["with config { ${1:fraction} := ${2:true} } {", "\t${3:body}", "}"],
+    "description": "block-local config override"
+  },
   "parfor": {
     "prefix": "parfor",
     "body": ["parfor ${1:i} in ${2:0}..${3:n} {", "\t${4:body}", "}"],
     "description": "parallel for loop"
+  },
+  "listcomp": {
+    "prefix": "listcomp",
+    "body": ["[${1:expr} for ${2:x} in ${3:iterable}${4: if ${5:cond}}]"],
+    "description": "Array comprehension"
+  },
+  "dictcomp": {
+    "prefix": "dictcomp",
+    "body": ["{${1:key}: ${2:value} for ${3:x} in ${4:iterable}${5: if ${6:cond}}}"],
+    "description": "Dict comprehension"
+  },
+  "setcomp": {
+    "prefix": "setcomp",
+    "body": ["{${1:expr} for ${2:x} in ${3:iterable}${4: if ${5:cond}}}"],
+    "description": "Set comprehension"
+  },
+  "fstring": {
+    "prefix": "fstring",
+    "body": ["f\"{${1:expr}}\""],
+    "description": "f-string"
+  },
+  "tex": {
+    "prefix": "tex",
+    "body": ["tex\"${1:\\\\alpha}\""],
+    "description": "TeX literal"
+  },
+  "nil": {
+    "prefix": "nil",
+    "body": ["Nil"],
+    "description": "unit value"
   },
   "println": {
     "prefix": "println",
