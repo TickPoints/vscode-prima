@@ -15,6 +15,10 @@ const ICON_THEME_ID = 'prima-icons';
 class PrimaChecker {
     private command = '';
 
+    private enabled = true;
+
+    private checkOnSave = true;
+
     private readonly collection: vscode.DiagnosticCollection;
 
     private readonly status: vscode.StatusBarItem;
@@ -37,8 +41,28 @@ class PrimaChecker {
 
     /** Resolve the toolchain and render the initial status. Safe to call again on config changes. */
     async start(): Promise<void> {
-        this.command = await resolvePrima(vscode.workspace.getConfiguration('prima').get<string>('command'));
+        const config = vscode.workspace.getConfiguration('prima');
+        this.enabled = config.get<boolean>('enable', true);
+        this.checkOnSave = config.get<boolean>('checkOnSave', true);
+
+        if (!this.enabled) {
+            this.command = '';
+            this.state.clear();
+            this.collection.clear();
+            this.render();
+            return;
+        }
+
+        this.command = await resolvePrima(config.get<string>('command'));
+        if (this.command.length > 0) {
+            // A toolchain installed after the extension started deserves a fresh warning set.
+            this.warnedMissingToolchain = false;
+        }
         this.render();
+    }
+
+    isEnabled(): boolean {
+        return this.enabled;
     }
 
     async checkDocument(doc?: vscode.TextDocument): Promise<void> {
@@ -51,16 +75,49 @@ class PrimaChecker {
             void vscode.window.showWarningMessage('The active editor is not a Prima file.');
             return;
         }
+        if (!this.enabled) {
+            void vscode.window.showInformationMessage('Prima checking is disabled (`prima.enable`).');
+            return;
+        }
+        if (!(await this.ensureCommand())) {
+            return;
+        }
         await this.check(target);
     }
 
     async checkAll(): Promise<void> {
-        if (this.command.length === 0) {
-            this.warnMissingToolchain();
+        if (!this.enabled) {
+            return;
+        }
+        if (!(await this.ensureCommand())) {
             return;
         }
         const documents = vscode.workspace.textDocuments.filter((doc) => doc.languageId === 'prima');
         await Promise.all(documents.map((doc) => this.check(doc)));
+    }
+
+    /** The save hook honours both switches without prompting the user. */
+    async checkOnSaveDocument(doc: vscode.TextDocument): Promise<void> {
+        if (!this.enabled || !this.checkOnSave || doc.languageId !== 'prima') {
+            return;
+        }
+        await this.check(doc);
+    }
+
+    /**
+     * Make sure a command is available, re-probing when the toolchain was installed
+     * after activation. Only manual commands pay for the re-probe; saves do not.
+     */
+    private async ensureCommand(): Promise<boolean> {
+        if (this.command.length > 0) {
+            return true;
+        }
+        await this.start();
+        if (this.command.length === 0) {
+            this.warnMissingToolchain();
+            return false;
+        }
+        return true;
     }
 
     /** Drop diagnostics for a document that is no longer open. */
@@ -71,6 +128,9 @@ class PrimaChecker {
     }
 
     private async check(doc: vscode.TextDocument): Promise<void> {
+        if (!this.enabled) {
+            return;
+        }
         if (this.command.length === 0) {
             this.warnMissingToolchain();
             return;
@@ -144,6 +204,10 @@ class PrimaChecker {
     }
 
     private render(): void {
+        if (!this.enabled) {
+            this.status.hide();
+            return;
+        }
         if (this.command.length === 0) {
             this.status.text = '$(warning) prima not found';
             this.status.tooltip = 'The `prima` toolchain was not found on PATH. Install it or set `prima.command`.';
@@ -213,12 +277,28 @@ function messageFor(d: PrimaDiagnostic): string {
 
 async function enableIcons(): Promise<void> {
     const workbench = vscode.workspace.getConfiguration('workbench');
+    const inspect = workbench.inspect<string>('iconTheme');
+
     if (workbench.get<string>('iconTheme') === ICON_THEME_ID) {
         void vscode.window.showInformationMessage('Prima Icons is already active.');
         return;
     }
-    await workbench.update('iconTheme', ICON_THEME_ID, vscode.ConfigurationTarget.Global);
-    void vscode.window.showInformationMessage('Prima Icons enabled. .pra files now show the Prima icon.');
+
+    // Write at the same scope that currently decides the value, otherwise a
+    // workspace `workbench.iconTheme` silently wins and the command lies about
+    // having switched the theme.
+    const overriddenInWorkspace =
+        inspect?.workspaceValue !== undefined || inspect?.workspaceFolderValue !== undefined;
+    const target = overriddenInWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    await workbench.update('iconTheme', ICON_THEME_ID, target);
+
+    if (workbench.get<string>('iconTheme') === ICON_THEME_ID) {
+        void vscode.window.showInformationMessage('Prima Icons enabled. .pra files now show the Prima icon.');
+    } else {
+        void vscode.window.showWarningMessage(
+            'Could not switch the icon theme: a higher-priority `workbench.iconTheme` value wins. Select Prima Icons from the File Icon Theme picker instead.',
+        );
+    }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -236,18 +316,21 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('prima.checkDocument', () => checker.checkDocument()),
         vscode.commands.registerCommand('prima.checkAll', () => checker.checkAll()),
         vscode.commands.registerCommand('prima.enableIcons', () => enableIcons()),
-        vscode.workspace.onDidSaveTextDocument((doc) => {
-            if (doc.languageId === 'prima') {
-                void checker.checkDocument(doc);
-            }
-        }),
+        vscode.workspace.onDidSaveTextDocument((doc) => checker.checkOnSaveDocument(doc)),
         vscode.workspace.onDidCloseTextDocument((doc) => {
             if (doc.languageId === 'prima') {
                 checker.forget(doc.uri);
             }
         }),
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration('prima.command')) {
+            if (event.affectsConfiguration('prima.enable') || event.affectsConfiguration('prima.command')) {
+                void checker.start().then(() => {
+                    if (checker.isEnabled()) {
+                        return checker.checkAll();
+                    }
+                    return undefined;
+                });
+            } else if (event.affectsConfiguration('prima.checkOnSave')) {
                 void checker.start();
             }
         }),

@@ -96,6 +96,12 @@ export class CheckState {
         this.documents.delete(uri);
     }
 
+    /** Drop every document, e.g. when checking is disabled. */
+    clear(): void {
+        this.documents.clear();
+        this.attempts.clear();
+    }
+
     /** Sum every open document, so one failing file cannot be masked by another's pass. */
     totals(): StateTotals {
         let errors = 0;

@@ -78,4 +78,15 @@ suite('Prima check state', () => {
 
         assert.deepStrictEqual(state.totals(), { errors: 2, warnings: 0, failed: false, documents: 1 });
     });
+
+    test('clear drops every document and every in-flight attempt', () => {
+        const state = new CheckState();
+        const inFlight = state.begin(A, 1);
+        state.settle(state.begin(B, 1), { errors: 2, warnings: 0 }, true, 1);
+
+        state.clear();
+
+        assert.strictEqual(state.isCurrent(inFlight), false);
+        assert.deepStrictEqual(state.totals(), { errors: 0, warnings: 0, failed: false, documents: 0 });
+    });
 });
