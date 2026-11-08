@@ -113,8 +113,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "bun run compile && vsce package --no-dependencies",
-    "test": "bun ./out/test/runTest.js"
+    "package": "vsce package --no-dependencies",
+    "test": "bun run compile && bun run test:unit && bun run test:integration",
+    "test:unit": "mocha --ui tdd out/test/suite",
+    "test:integration": "bun ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",

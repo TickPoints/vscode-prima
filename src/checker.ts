@@ -139,6 +139,51 @@ export function charOffsetAtByte(text: string, byteOffset: number): number {
 }
 
 /**
+ * Build a one-pass byte-offset → UTF-16-offset mapper for `text`.
+ *
+ * Encoding the whole document once per diagnostic is `O(n·m)`; mapping many
+ * diagnostics from a single check needs `O(n)` work once. Offsets that land in the
+ * middle of a multi-byte character resolve to that character's first UTF-16 unit,
+ * which is what the editor should highlight.
+ */
+export function createByteToCharIndex(text: string): (byteOffset: number) => number {
+    const byteStarts: number[] = [];
+    const characterStarts: number[] = [];
+    let byte = 0;
+    let character = 0;
+
+    for (const codePoint of text) {
+        byteStarts.push(byte);
+        characterStarts.push(character);
+        byte += Buffer.byteLength(codePoint, 'utf8');
+        character += codePoint.length;
+    }
+    byteStarts.push(byte);
+    characterStarts.push(character);
+
+    return (byteOffset: number): number => {
+        if (byteOffset <= 0) {
+            return 0;
+        }
+        if (byteOffset >= byte) {
+            return character;
+        }
+        // Binary search for the last character boundary at or before the offset.
+        let low = 0;
+        let high = byteStarts.length - 1;
+        while (low < high) {
+            const middle = (low + high + 1) >> 1;
+            if (byteStarts[middle] <= byteOffset) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return characterStarts[low];
+    };
+}
+
+/**
  * Resolve the `prima` executable. Returns the configured command when a path is
  * given, otherwise probes PATH for `prima` by invoking `--version`. Returns the
  * empty string when no executable is available.
@@ -150,7 +195,7 @@ export async function resolvePrima(command: string | undefined): Promise<string>
     }
 
     try {
-        await execFileAsync(bin, ['--version'], { timeout: PROBE_TIMEOUT_MS });
+        await execFileAsync(bin, ['--version'], { timeout: PROBE_TIMEOUT_MS, windowsHide: true });
         return bin;
     } catch {
         return '';
@@ -175,6 +220,8 @@ export async function checkText(text: string, command: string, options: CheckOpt
         const { stdout, stderr } = await execFileAsync(command, ['--json', 'check', tmpFile], {
             timeout: timeoutMs,
             maxBuffer: MAX_OUTPUT_BYTES,
+            // Keep a console window from flashing on Windows when the check runs.
+            windowsHide: true,
             env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
         });
         const output = joinStreams(stdout, stderr);

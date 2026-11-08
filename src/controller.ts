@@ -2,9 +2,7 @@
 export interface DiagnosticTally {
     errors: number;
     warnings: number;
-}
-
-/** Aggregated view across every open document, used to render the status bar. */
+}/** Aggregated view across every open document, used to render the status bar. */
 export interface StateTotals extends DiagnosticTally {
     /** True when any open document's latest check could not run. */
     failed: boolean;
@@ -113,5 +111,42 @@ export class CheckState {
             failed = failed || document.failed;
         }
         return { errors, warnings, failed, documents: this.documents.size };
+    }
+}
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight. Every item is visited
+ * even when one fails; the first failure is re-thrown once the pool drains, so a
+ * failure cannot silently cancel its siblings.
+ */
+export async function mapLimit<T>(
+    items: readonly T[],
+    limit: number,
+    worker: (item: T) => Promise<void>,
+): Promise<void> {
+    if (limit < 1) {
+        throw new RangeError('mapLimit needs a limit of at least 1');
+    }
+
+    let next = 0;
+    let firstError: unknown;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (true) {
+            const index = next;
+            next += 1;
+            if (index >= items.length) {
+                return;
+            }
+            try {
+                await worker(items[index]);
+            } catch (error) {
+                firstError ??= error;
+            }
+        }
+    });
+
+    await Promise.all(runners);
+    if (firstError !== undefined) {
+        throw firstError;
     }
 }

@@ -1,10 +1,12 @@
 # CI pipeline: compile, test, and package the extension on every push/PR.
 #
 # - compile: `tsc` must pass (strict mode, no unused locals).
+# - unit:    plain mocha, milliseconds, no VS Code download.
 # - test:    @vscode/test-electron integration suite under xvfb (headless Linux).
 # - package: `vsce package` produces a `.vsix` uploaded as a build artifact.
 #
-# The JavaScript toolchain is Bun (see `packageManager` in package.json).
+# The JavaScript toolchain is Bun; the version is pinned to `packageManager` in
+# package.json so CI and local builds agree.
 
 name: ci
 
@@ -29,7 +31,21 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
+
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Cache VS Code test download
+        uses: actions/cache@v4
+        with:
+          path: ~/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: vscode-test-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -37,11 +53,17 @@ jobs:
       - name: Compile
         run: bun run compile
 
-      - name: Test (headless)
-        run: xvfb-run -a bun run test
+      - name: Unit tests
+        run: bun run test:unit
+
+      - name: Integration tests (headless)
+        run: xvfb-run -a bun run test:integration
 
       - name: Package .vsix
         run: bun run package
+
+      - name: List packaged files
+        run: bunx vsce ls --no-dependencies
 
       - name: Upload .vsix artifact
         uses: actions/upload-artifact@v4

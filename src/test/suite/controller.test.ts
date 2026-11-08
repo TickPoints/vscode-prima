@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 
-import { CheckState } from '../../controller';
+import { CheckState, mapLimit } from '../../controller';
 
 const A = 'file:///a.pra';
 const B = 'file:///b.pra';
@@ -88,5 +88,40 @@ suite('Prima check state', () => {
 
         assert.strictEqual(state.isCurrent(inFlight), false);
         assert.deepStrictEqual(state.totals(), { errors: 0, warnings: 0, failed: false, documents: 0 });
+    });
+});
+
+suite('Prima concurrency limit', () => {
+    test('runs at most `limit` workers at a time and visits every item', async () => {
+        let running = 0;
+        let peak = 0;
+        const seen: number[] = [];
+        const items = Array.from({ length: 11 }, (_, index) => index);
+
+        await mapLimit(items, 3, async (item) => {
+            running += 1;
+            peak = Math.max(peak, running);
+            seen.push(item);
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            running -= 1;
+        });
+
+        assert.strictEqual(peak, 3, 'the pool should be saturated but never exceeded');
+        assert.deepStrictEqual(seen.sort((a, b) => a - b), items);
+    });
+
+    test('keeps going after a worker rejects, then reports the failure', async () => {
+        const seen: number[] = [];
+
+        await assert.rejects(
+            mapLimit([1, 2, 3], 2, async (item) => {
+                seen.push(item);
+                if (item === 2) {
+                    throw new Error('boom');
+                }
+            }),
+            /boom/,
+        );
+        assert.deepStrictEqual(seen.sort((a, b) => a - b), [1, 2, 3]);
     });
 });

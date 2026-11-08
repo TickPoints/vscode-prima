@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { charOffsetAtByte, checkText, parseCheckJson, resolvePrima } from '../../checker';
+import { charOffsetAtByte, checkText, createByteToCharIndex, parseCheckJson, resolvePrima } from '../../checker';
 
 /** One NDJSON line as emitted by `prima --json check`. */
 function ndjson(value: Record<string, unknown>): string {
@@ -135,6 +135,31 @@ suite('Prima checker', () => {
     test('clamps out-of-range byte offsets', () => {
         assert.strictEqual(charOffsetAtByte('abc', 999), 3);
         assert.strictEqual(charOffsetAtByte('abc', -5), 0);
+    });
+
+    test('indexes byte offsets once and agrees with the per-call mapper', () => {
+        const text = 'let α = "汉字";\nlet β = 1;\n';
+        const offsetAt = createByteToCharIndex(text);
+
+        let byte = 0;
+        let character = 0;
+        for (const codePoint of text) {
+            assert.strictEqual(offsetAt(byte), character, `byte offset ${byte}`);
+            assert.strictEqual(offsetAt(byte), charOffsetAtByte(text, byte), `byte offset ${byte}`);
+            byte += Buffer.byteLength(codePoint, 'utf8');
+            character += codePoint.length;
+        }
+        assert.strictEqual(offsetAt(byte), character, 'end of text');
+    });
+
+    test('maps a byte offset inside a multi-byte character to its first UTF-16 unit', () => {
+        // `α` occupies bytes 4 and 5; either half maps to the character itself, never
+        // to a replacement character that would shift every later span by one.
+        const text = 'let α = 1;\n';
+        const offsetAt = createByteToCharIndex(text);
+        assert.strictEqual(offsetAt(4), 4);
+        assert.strictEqual(offsetAt(5), 4);
+        assert.strictEqual(offsetAt(6), 5);
     });
 
     test('reports a missing executable without throwing', async () => {

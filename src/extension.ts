@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 
-import { charOffsetAtByte, checkText, resolvePrima, type CheckResult, type PrimaDiagnostic } from './checker';
-import { CheckState } from './controller';
+import { checkText, createByteToCharIndex, resolvePrima, type CheckResult, type PrimaDiagnostic } from './checker';
+import { CheckState, mapLimit } from './controller';
 
 const DIAGNOSTIC_COLLECTION = 'prima';
 const ICON_THEME_ID = 'prima-icons';
+/** How many `prima check` processes may run at once when checking every open file. */
+const CHECK_CONCURRENCY = 4;
 
 /**
  * Owns the diagnostic collection and status bar, and turns `prima check` results into
@@ -93,7 +95,7 @@ class PrimaChecker {
             return;
         }
         const documents = vscode.workspace.textDocuments.filter((doc) => doc.languageId === 'prima');
-        await Promise.all(documents.map((doc) => this.check(doc)));
+        await mapLimit(documents, CHECK_CONCURRENCY, (doc) => this.check(doc));
     }
 
     /** The save hook honours both switches without prompting the user. */
@@ -192,9 +194,11 @@ class PrimaChecker {
     }
 
     private toDiagnostics(doc: vscode.TextDocument, text: string, result: CheckResult): vscode.Diagnostic[] {
+        // Encode the document once, then map every span against the same index.
+        const offsetAt = createByteToCharIndex(text);
         return result.diagnostics.map((d) => {
             const severity = d.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
-            const diagnostic = new vscode.Diagnostic(rangeFor(doc, text, d), messageFor(d), severity);
+            const diagnostic = new vscode.Diagnostic(rangeFor(doc, offsetAt, d), messageFor(d), severity);
             diagnostic.source = 'prima';
             if (d.code) {
                 diagnostic.code = d.code;
@@ -240,13 +244,17 @@ class PrimaChecker {
 
 /**
  * Map a diagnostic's byte span to a range. `prima --json` reports UTF-8 byte offsets;
- * VS Code positions count UTF-16 code units, so the bytes are decoded up to the offset.
+ * VS Code positions count UTF-16 code units, so the prebuilt index converts them.
  * Falls back to the reported line/column when the diagnostic carries no span.
  */
-function rangeFor(doc: vscode.TextDocument, text: string, d: PrimaDiagnostic): vscode.Range {
+function rangeFor(
+    doc: vscode.TextDocument,
+    offsetAt: (byteOffset: number) => number,
+    d: PrimaDiagnostic,
+): vscode.Range {
     if (d.byteStart >= 0 && d.byteEnd >= d.byteStart) {
-        const start = doc.positionAt(charOffsetAtByte(text, d.byteStart));
-        const end = doc.positionAt(charOffsetAtByte(text, d.byteEnd));
+        const start = doc.positionAt(offsetAt(d.byteStart));
+        const end = doc.positionAt(offsetAt(d.byteEnd));
         const range = new vscode.Range(start, end.isAfter(start) ? end : start.translate(0, 1));
         return doc.validateRange(range);
     }
