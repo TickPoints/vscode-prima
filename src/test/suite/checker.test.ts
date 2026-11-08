@@ -190,6 +190,40 @@ suite('Prima checker', () => {
         assert.match(result.error ?? '', /timed out/i);
     });
 
+    test('flags a killed run even when it printed diagnostics first', async function () {
+        this.timeout(10000);
+        const diagnostic = ndjson({
+            code: 'W0003',
+            message: 'unused binding: `a`',
+            severity: 'warning',
+            spans: [{ byte_end: 5, byte_start: 4, column: 5, is_primary: true, line: 1 }],
+        });
+        // Emit one diagnostic, then hang until the timeout kills the run.
+        const fake = fakePrima(`printf '%s\\n' '${diagnostic}' >&2\nsleep 30`);
+        const result = await checkText('let a = 1;\n', fake, { timeoutMs: 400 });
+
+        assert.strictEqual(result.diagnostics.length, 1, 'the partial diagnostic is still useful');
+        assert.ok(result.error, 'incomplete output must not look like a finished run');
+        assert.match(result.error ?? '', /timed out|incomplete/i);
+    });
+
+    test('returns an error instead of rejecting when the temp directory is unusable', async () => {
+        const previous = process.env.TMPDIR;
+        process.env.TMPDIR = path.join(os.tmpdir(), 'prima-no-such-directory-for-tests');
+        try {
+            const result = await checkText('let a = 1;\n', '/nonexistent/prima-does-not-exist');
+            assert.strictEqual(result.exitCode, -1);
+            assert.ok(result.error, 'a filesystem failure must be reported, not thrown');
+            assert.match(result.error ?? '', /temporary/i);
+        } finally {
+            if (previous === undefined) {
+                delete process.env.TMPDIR;
+            } else {
+                process.env.TMPDIR = previous;
+            }
+        }
+    });
+
     test('keeps diagnostics when a run exits non-zero with output', async () => {
         const diagnostic = ndjson({
             code: 'E0010',

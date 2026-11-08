@@ -210,42 +210,65 @@ export async function resolvePrima(command: string | undefined): Promise<string>
  * stdlib, so the temporary location does not change the result.
  */
 export async function checkText(text: string, command: string, options: CheckOptions = {}): Promise<CheckResult> {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prima-'));
-    const tmpFile = path.join(tmpDir, 'check.pra');
     const timeoutMs = options.timeoutMs ?? CHECK_TIMEOUT_MS;
 
+    let tmpDir: string;
     try {
-        fs.writeFileSync(tmpFile, text, 'utf8');
-
-        const { stdout, stderr } = await execFileAsync(command, ['--json', 'check', tmpFile], {
-            timeout: timeoutMs,
-            maxBuffer: MAX_OUTPUT_BYTES,
-            // Keep a console window from flashing on Windows when the check runs.
-            windowsHide: true,
-            env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
-        });
-        const output = joinStreams(stdout, stderr);
-        const diagnostics = parseCheckJson(output);
-        return { exitCode: 0, diagnostics, error: unexplainedOutput(output, diagnostics) };
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prima-'));
     } catch (err) {
-        const e = err as ExecFailure;
-        if (e.code === 'ENOENT') {
-            return { exitCode: -1, diagnostics: [], error: `prima executable not found: ${command}` };
+        return failure(-1, `could not create a temporary directory for \`prima check\`: ${describeError(err)}`);
+    }
+
+    const tmpFile = path.join(tmpDir, 'check.pra');
+    try {
+        try {
+            fs.writeFileSync(tmpFile, text, 'utf8');
+        } catch (err) {
+            return failure(-1, `could not write the temporary source file for \`prima check\`: ${describeError(err)}`);
         }
 
-        const output = joinStreams(e.stdout, e.stderr);
-        const diagnostics = parseCheckJson(output);
-        const exitCode = typeof e.code === 'number' ? e.code : 2;
-        return {
-            exitCode,
-            diagnostics,
-            // A run that carried diagnostics has already explained itself. Everything
-            // else — a non-zero exit, a timeout, a signal, a buffer overflow — must
-            // surface as an error; otherwise "could not run" masquerades as "passed".
-            error: diagnostics.length > 0 ? undefined : failureMessage(e, exitCode, output, timeoutMs),
-        };
+        try {
+            const { stdout, stderr } = await execFileAsync(command, ['--json', 'check', tmpFile], {
+                timeout: timeoutMs,
+                maxBuffer: MAX_OUTPUT_BYTES,
+                // Keep a console window from flashing on Windows when the check runs.
+                windowsHide: true,
+                env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+            });
+            const output = joinStreams(stdout, stderr);
+            const diagnostics = parseCheckJson(output);
+            return { exitCode: 0, diagnostics, error: unexplainedOutput(output, diagnostics) };
+        } catch (err) {
+            const e = err as ExecFailure;
+            if (e.code === 'ENOENT') {
+                return failure(-1, `prima executable not found: ${command}`);
+            }
+
+            const output = joinStreams(e.stdout, e.stderr);
+            const diagnostics = parseCheckJson(output);
+            const exitCode = typeof e.code === 'number' ? e.code : 2;
+
+            // A killed or truncated run may still have emitted some diagnostics; they
+            // remain useful, but the result must never look complete.
+            const interruption = interruptionMessage(e, timeoutMs);
+            if (interruption !== undefined) {
+                return { exitCode, diagnostics, error: `${interruption} Results may be incomplete.` };
+            }
+
+            return {
+                exitCode,
+                diagnostics,
+                // A run that carried diagnostics has already explained itself; a silent
+                // non-zero exit has not, and must not masquerade as a pass.
+                error: diagnostics.length > 0 ? undefined : failureMessage(output, exitCode),
+            };
+        }
     } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
+        try {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch {
+            // Best effort: a transient lock on Windows must not discard a valid result.
+        }
     }
 }
 
@@ -258,25 +281,42 @@ interface ExecFailure {
     stderr?: string;
 }
 
+function failure(exitCode: number, error: string): CheckResult {
+    return { exitCode, diagnostics: [], error };
+}
+
+function describeError(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+}
+
 /**
- * Explain why a check produced no diagnostics. Prefers the most specific cause the
- * process reports (timeout, signal, oversized output), falling back to the captured
- * output and finally to the exit code itself.
+ * Explain a run that was interrupted rather than completing: a timeout, a signal,
+ * or an output buffer overflow. Returns `undefined` for an ordinary non-zero exit.
  */
-function failureMessage(e: ExecFailure, exitCode: number, output: string, timeoutMs: number): string {
+function interruptionMessage(e: ExecFailure, timeoutMs: number): string | undefined {
     if (e.code === 'ETIMEDOUT' || (e.killed === true && e.signal !== undefined)) {
-        return `\`prima check\` timed out after ${Math.round(timeoutMs / 1000)}s and was killed.`;
+        return `\`prima check\` timed out after ${formatSeconds(timeoutMs)} and was killed.`;
     }
     if (e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-        return `\`prima check\` produced more than ${Math.round(MAX_OUTPUT_BYTES / (1024 * 1024))} MiB of output and was stopped.`;
-    }
-
-    const hint = unexplainedOutput(output, []);
-    if (hint !== undefined) {
-        return hint;
+        const mebibytes = Math.round(MAX_OUTPUT_BYTES / (1024 * 1024));
+        return `\`prima check\` produced more than ${mebibytes} MiB of output and was stopped.`;
     }
     if (typeof e.signal === 'string' && e.signal.length > 0) {
         return `\`prima check\` was killed by ${e.signal}.`;
+    }
+    return undefined;
+}
+
+function formatSeconds(milliseconds: number): string {
+    const seconds = milliseconds / 1000;
+    return `${seconds < 1 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+}
+
+/** Explain a silent non-zero exit: the captured output if any, else the exit code. */
+function failureMessage(output: string, exitCode: number): string {
+    const hint = unexplainedOutput(output, []);
+    if (hint !== undefined) {
+        return hint;
     }
     return `\`prima check\` exited with code ${exitCode} and reported no diagnostics.`;
 }
